@@ -511,7 +511,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq, int who)
             }
         }
         * End of Mod */
-	}
+    }
 
 	/* ensure we never gain time by being placed backwards. */
 	cfs_rq->min_vruntime = max_vruntime(cfs_rq->min_vruntime, vruntime);
@@ -523,16 +523,26 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq, int who)
     /* Mod bY YZhao
      *
      */
-    if ((cfs_rq->counter < 500)) {
+    if (cfs_rq->counter == 0) {
+        cfs_rq->start_time = jiffies;
+    }
+    //if ((cfs_rq->counter < 500)) {
+    if (jiffies - cfs_rq->start_time <= 3) {
         cfs_rq->diff_min_vruntime += (cfs_rq->min_vruntime - min_vruntime_copy);
-        cfs_rq->counter++;
+        //cfs_rq->sum_min_vruntime += (cfs_rq->min_vruntime - min_vruntime_copy);
+        //cfs_rq->counter++;
     } else {
-        cfs_rq->counter = 0;
+        cfs_rq->start_time = jiffies;
+        //cfs_rq->counter = 0;
         cfs_rq->diff_min_vruntime = 0;
+        //cfs_rq->diff_min_vruntime = (cfs_rq->sum_min_vruntime / 3);
+        //cfs_rq->diff_min_vruntime = ((cfs_rq->diff_min_vruntim * 7) / 8 
+           // + (cfs_rq->sum_min_vruntime / 8));
     }
 
     if ((flag == 1)) {
-        printk("In UPDATE_Min jiffies: %llu, cfs_vrun: %llu vrun: %llu diff: %llu\n", jiffies, cfs_rq->min_vruntime, vruntime, cfs_rq->diff_min_vruntime);
+        printk("In UPDATE_Min jiffies: %llu, cfs_vrun: %llu vrun: %llu diff: %llu\n", \
+                jiffies, cfs_rq->min_vruntime, vruntime, cfs_rq->diff_min_vruntime);
 
     }
 
@@ -615,7 +625,7 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 }
 
-static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int who)
 {
 
         /* Mod bY YZhao
@@ -625,9 +635,9 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
         struct task_struct* p = task_of(se);
         int flag = 0;
 
-        if (strcmp(p->comm, "ploop") == 0 && (cpu == 2)) {
-            //printk("In Set_Next cur_cpu: %d, cfs_cpu: %d, curr_pid: %d, jiffies: %llu, curr_vrun: %llu, cfs_vrun: %llu\n",
-            //        cpu, cfs_rq->rq->cpu, p->pid, jiffies, cfs_rq->curr->vruntime, cfs_rq->min_vruntime);
+        if (strcmp(p->comm, "streamcluster") == 0 && (cpu == 2)) {
+            printk("In _dequeue_entity who: %d, cur_cpu: %d, cfs_cpu: %d, curr_pid: %d, jiffies: %llu, curr_vrun: %llu, cfs_vrun: %llu\n",
+                    who, cpu, cfs_rq->rq->cpu, p->pid, jiffies, cfs_rq->curr->vruntime, cfs_rq->min_vruntime);
             flag = 1;
         }
 
@@ -638,7 +648,7 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
         if (left && (flag == 1)) {
             lse = rb_entry(left, struct sched_entity, run_node);
             lp = task_of(lse);
-            printk("In Set_Next lpid: %d, lname: %s, jiffies: %llu, lvruntime: %llu \n", lp->pid, lp->comm, jiffies, lse->vruntime);
+            printk("In _dequeue_entity who: %d, lpid: %d, lname: %s, jiffies: %llu, lvruntime: %llu \n", who, lp->pid, lp->comm, jiffies, lse->vruntime);
         }
      
         * End of Mod YZhao */
@@ -3283,12 +3293,12 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
     /* Mod bY YZhao
      * 4/6/2017
-     */
+     *
     if (se->enqueue_counter < 15) {
         se->enqueue_vruntime[se->enqueue_counter] = se->vruntime;
         se->enqueue_counter++;
     }
-    /* End of Mod */
+    * End of Mod */
 
 	/*
 	 * Update run-time statistics of the 'current'.
@@ -3381,10 +3391,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
     /* Mod bY YZhao
      * 4/6/2017
      */
+    /*
     if (se->dequeue_counter < 15) {
         se->dequeue_vruntime[se->dequeue_counter] = se->vruntime;
         se->dequeue_counter++;
     }
+    */
+
+	se->exec_time = se->sum_exec_runtime - se->prev_sum_exec_runtime;
     /* End of Mod */
 
 	/*
@@ -3411,7 +3425,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	clear_buddies(cfs_rq, se);
 
 	if (se != cfs_rq->curr)
-		__dequeue_entity(cfs_rq, se);
+		__dequeue_entity(cfs_rq, se, 1);
 	se->on_rq = 0;
 	account_entity_dequeue(cfs_rq, se);
 
@@ -3456,6 +3470,48 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 
 	ideal_runtime = sched_slice(cfs_rq, curr);
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
+
+    /* Mod bY YZhao
+     * 6/7/2017
+     */
+    struct task_struct* p = NULL;
+    int cpu = smp_processor_id();
+    struct list_head* ptr = NULL;
+
+    p = task_of(curr);
+    curr->timeslice = ideal_runtime;
+    //curr->exec_time = delta_exec;
+
+    /*
+    if ((cpu == 2) && (strcmp(p->comm, "streamcluster") == 0 || strcmp(p->comm, "wloop") == 0)) {
+        printk("In Check_Preempt cpu: %d, name: %s, pid: %d, parent_name: %s, parent_id: %d, r_parent_name: %s, r_parent_pid: %d, jiffies: %llu, ideal: %llu, delta: %llu, nr: %d\n", \
+                cpu, p->comm, p->pid, p->parent->comm, p->parent->pid, p->real_parent->comm, p->real_parent->pid, jiffies, ideal_runtime, delta_exec, cfs_rq->nr_running);
+
+        struct task_struct* parent = p->real_parent;
+        if (strcmp(p->comm, "streamcluster") == 0) {
+            list_for_each(ptr, &p->thread_group) {
+                struct task_struct* tmp = NULL;
+                tmp = list_entry(ptr, struct task_struct, thread_group);
+                printk("Thread Group Parent: %s, Parent_Pid: %d, Child name: %s, pid: %d \n", \
+                        parent->comm, parent->pid, tmp->comm, tmp->pid);
+            }
+        }
+
+        parent = p->group_leader;
+        if (strcmp(p->comm, "streamcluster") == 0) {
+            list_for_each(ptr, &parent->thread_group) {
+                struct task_struct* tmp = NULL;
+                tmp = list_entry(ptr, struct task_struct, thread_group);
+                printk("name: %s, pid: %d on: %d, on_cpu: %d, cpu: %d \n", \
+                       tmp->comm, tmp->pid, tmp->on_rq, tmp->on_cpu, task_cpu(tmp));
+            }
+        }
+
+    }
+    */
+    /* End of Mod */
+
+
 	if (delta_exec > ideal_runtime) {
 		resched_curr(rq_of(cfs_rq));
 		/*
@@ -3495,7 +3551,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		 * runqueue.
 		 */
 		update_stats_wait_end(cfs_rq, se);
-		__dequeue_entity(cfs_rq, se);
+		__dequeue_entity(cfs_rq, se, 0);
 		update_entity_load_avg(se, 1);
 
         /* Mod bY YZhao
@@ -3669,6 +3725,21 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 			hrtimer_active(&rq_of(cfs_rq)->hrtick_timer))
 		return;
 #endif
+
+    /* Mod bY YZhao
+     * 6/7/2017
+     *
+     *
+    struct task_struct* p = NULL;
+    int cpu = smp_processor_id(); 
+    p = task_of(curr);
+
+    if ((cpu == 0 || cpu == 2) && (strcmp(p->comm, "streamcluster") == 0 || strcmp(p->comm, "wloop") == 0)) {
+        printk("In Entity_Tick cpu: %d, name: %s, pid: %d, jiffies: %llu, parent_name: %s, parent_pid: %d, nr: %d\n", \
+                cpu, p->comm, p->pid, jiffies, p->real_parent->comm, p->real_parent->pid, cfs_rq->nr_running);
+    }
+    * End of Mod */
+
 
 	if (cfs_rq->nr_running > 1)
 		check_preempt_tick(cfs_rq, curr);
@@ -4520,12 +4591,26 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
     /* Mod bY YZhao
      *
      *
-    if (strcmp(current->comm, "ploop") == 0) {
-        printk("In Enqueue_Task  pid: %d, name: %s, cpu: %d, jiffies: %llu, vruntime: %llu cfs_vrun: %llu\n", p->pid, p->comm, task_cpu(p), jiffies, se->vruntime, );
+    if (strcmp(p->comm, "streamcluster") == 0) {
+        printk("In Enqueue_Task  pid: %d, name: %s, cpu: %d, jiffies: %llu, vruntime: %llu \n",\
+                p->pid, p->comm, task_cpu(p), jiffies, se->vruntime);
     }
     * End of Mod YZhao */
  
 	for_each_sched_entity(se) {
+
+        /* Mod bY YZhao
+         *
+         *
+        if (entity_is_task(se)) {
+            struct task_struct* p = task_of(se);
+            if (strcmp(p->comm, "streamcluster") == 0) {
+                printk("In Enqueue_entity for name: %s, pid: %d\n",
+                        p->comm, p->pid);
+            }
+        }
+        * End of Mod */
+
 		if (se->on_rq)
 			break;
 		cfs_rq = cfs_rq_of(se);
@@ -5123,6 +5208,70 @@ done:
     if (!idle_cpu(target)) {
         int index = 0;
         int candidate = 0;
+        int old_target = target;
+        struct sched_domain* sd = NULL;
+        int layer = 0;
+        int flag = 0;
+
+    	rcu_read_lock();
+    	for_each_domain(target, sd) {
+            layer++;
+            
+            if (strcmp(p->comm, "streamcluster") == 0) {
+                for_each_cpu(index, sched_domain_span(sd)) {
+                    printk("Name: %s, pid: %d, layer: %d, cpu: %d\n", p->comm, p->pid, layer, index);
+                }
+            }
+            
+
+            if ((layer == 2) && strcmp(p->comm, "streamcluster") == 0) {
+                for_each_cpu(index, sched_domain_span(sd)) {
+                    flag = cpumask_test_cpu(index, tsk_cpus_allowed(p));
+                    if (flag != 0) {
+                        rq = cpu_rq(index);
+                        cfs_rq = &rq->cfs;
+                        if ((cfs_rq->diff_min_vruntime > max_diff_vruntime)
+                                && (cfs_rq->is_selected == 0)) {
+                            max_diff_vruntime = cfs_rq->diff_min_vruntime;
+                            cpu = index;
+                            candidate = 1;
+                         }
+                    }
+                }
+                if (candidate == 1) {
+                    target = cpu;
+                    rq = cpu_rq(target);
+                    cfs_rq = &rq->cfs;
+                    cfs_rq->is_selected = 1;
+
+                    p->set_diff = 1;
+                } else {
+                    for_each_cpu(index, tsk_cpus_allowed(p)) {
+                        rq = cpu_rq(index);
+                        cfs_rq = &rq->cfs;
+                        if ((cfs_rq->diff_min_vruntime > max_diff_vruntime)
+                                && (cfs_rq->is_selected == 0)) {
+                            max_diff_vruntime = cfs_rq->diff_min_vruntime;
+                            cpu = index;
+                            candidate = 1;
+                        }
+                    }
+                    if (candidate == 1) {
+                        target = cpu;
+                        rq = cpu_rq(target);
+                        cfs_rq = &rq->cfs;
+                        cfs_rq->is_selected = 1;
+                    } 
+                    for_each_cpu(index, sched_domain_span(sd)) {
+                        rq = cpu_rq(index);
+                        cfs_rq = &rq->cfs;
+                        cfs_rq->is_selected = 0;
+                    }
+                }
+            }
+        }
+        rcu_read_unlock();
+
         for_each_cpu(index, tsk_cpus_allowed(p)) {
             rq = cpu_rq(index);
             cfs_rq = &rq->cfs;
@@ -5149,7 +5298,18 @@ done:
             }
         }
 
+        if (strcmp(p->comm, "streamcluster") == 0) {
+            for_each_cpu(index, tsk_cpus_allowed(p)) {
+                printk("Name: %s, pid: %d, cpu_allowed: %d\n", p->comm, p->pid, index);
+            }
+            rq = cpu_rq(target);
+            cfs_rq = &rq->cfs;
+            printk("Name: %s, pid: %d, old: %d, new: %d, jiffies: %llu, diff: %llu\n",\
+                    p->comm, p->pid, old_target, target, jiffies, cfs_rq->diff_min_vruntime);
+        }
+
     }
+
     * End of Mod */
 
 	return target;
@@ -5470,6 +5630,19 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev)
 	struct task_struct *p;
 	int new_tasks = 0;
 
+    /* Mod bY YZhao
+     *
+     */
+    struct sched_entity* lse = NULL;
+    struct task_struct* lp = NULL;
+    struct task_struct* parent = NULL;
+    struct list_head* ptr = NULL;
+    struct task_struct* target = NULL;
+    int cpu = smp_processor_id();
+    int flag = 0;
+
+    /* End of Mod */
+
 again:
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	if (!cfs_rq->nr_running)
@@ -5477,6 +5650,16 @@ again:
 
 	if (prev->sched_class != &fair_sched_class)
 		goto simple;
+
+    /* Mod bY YZhao
+     *
+     *
+
+    if ((strcmp(prev->comm, "streamcluster") == 0 || strcmp(prev->comm, "wloop") == 0) && (cpu == 2 || cpu == 6)) {
+        printk("Before Pick_Next_1 cpu: %d, jiffies: %llu, prev_flag: %d, prev_pid: %d, prev_name: %s t_cpu: %d, ts: %llu, exec: %llu\n", 
+            cpu, jiffies, prev->is_deactivate, prev->pid, prev->comm, task_cpu(prev), prev->se.timeslice, prev->se.exec_time);
+    }
+    * End of Mod */
 
 	/*
 	 * Because of the set_next_buddy() in dequeue_task_fair() it is rather
@@ -5515,27 +5698,27 @@ again:
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 
+     /* Mod bY YZhao
+     *
+     *
+
+    if ((strcmp(prev->comm, "streamcluster") == 0 || strcmp(prev->comm, "wloop") == 0) && (cpu == 2 || cpu == 6)) {
+        printk("Before Pick_Next_2 cpu: %d, jiffies: %llu, prev_flag: %d, prev_pid: %d, prev_name: %s t_cpu: %d, ts: %llu, exec: %llu\n", 
+            cpu, jiffies, prev->is_deactivate, prev->pid, prev->comm, task_cpu(prev), prev->se.timeslice, prev->se.exec_time);
+    }
+    * End of Mod */
+
 	p = task_of(se);
 
     /* Mod bY YZhao
      *
-     *
-    struct sched_entity* lse = NULL;
-    struct task_struct* lp = NULL;
-    struct rb_node* left = cfs_rq->rb_leftmost;
-    int flag = 0;
-    if (strcmp(p->comm, "ploop") == 0) {
-        printk("Before Pick_Next pid: %d, name: %s, cpu: %d, jiffies: %llu, vruntime: %llu prev_pid: %d, prev_name: %s, prev_vrun: %llu\n", p->pid, p->comm, task_cpu(p), jiffies, se->vruntime, prev->pid, prev->comm, prev->se.vruntime);
-        flag = 1;
-    }
+     */
 
-    if (left && (flag == 1)) {
-        lse = rb_entry(left, struct sched_entity, run_node);
-        lp = task_of(lse);
-        printk("Before Pick_Next lpid: %d, lname: %s, jiffies: %llu, lvruntime: %llu \n", lp->pid, lp->comm, jiffies, lse->vruntime);
+    if ((strcmp(prev->comm, "streamcluster") == 0 || strcmp(prev->comm, "wloop") == 0) && (cpu == 2 || cpu == 6)) {
+        printk("Before Pick_Next_3 cpu: %d, p_name: %s, p_pid: %d, jiffies: %llu, prev_flag: %d, prev_pid: %d, prev_name: %s t_cpu: %d, ts: %llu\n", 
+            cpu, p->comm, p->pid, jiffies, prev->is_deactivate, prev->pid, prev->comm, task_cpu(prev), prev->se.timeslice);
     }
-        
-    * End of Mod */
+    /* End of Mod */
 
 
 	/*
@@ -5617,6 +5800,113 @@ idle:
 		goto again;
 
 	return NULL;
+
+traverse:
+    /* Mod bY YZhao
+     *
+     */
+
+    /*
+    if ((strcmp(prev->comm, "streamcluster") == 0 || strcmp(prev->comm, "wloop") == 0) && cpu == 2) {
+        printk("Before Pick_Next pid: %d, name: %s, cpu: %d, jiffies: %llu, prev_flag: %d, prev_pid: %d, prev_name: %s t_cpu: %d, ts: %llu, exec: %llu\n", 
+            p->pid, p->comm, task_cpu(p), jiffies, prev->is_deactivate, prev->pid, prev->comm, task_cpu(prev), prev->se.timeslice, prev->se.exec_time);
+        flag = 1;
+    }
+    */
+
+    parent = prev->group_leader;
+
+    if ((strcmp(prev->comm, "streamcluster") == 0) && (cpu == 2) 
+            && (prev->is_deactivate == 1) && (prev->se.timeslice - prev->se.exec_time > 0) 
+            && (prev->se.exec_time > 1000000)) {
+        list_for_each(ptr, &parent->thread_group) {
+            struct task_struct* sibling = NULL;
+            sibling = list_entry(ptr, struct task_struct, thread_group);
+            int sibling_cpu = task_cpu(sibling);
+            if ((sibling->pid != prev->pid) && (cpu != sibling_cpu)) {
+
+                int src_cpu = task_cpu(sibling);
+                struct rq* src_rq = task_rq(sibling);
+                struct rq* dst_rq = task_rq(prev);
+                unsigned long flags;
+                if (!task_running(src_rq, sibling) 
+                        && task_on_rq_queued(sibling)) {
+
+                    raw_spin_unlock(&dst_rq->lock);
+
+                    raw_spin_lock(&sibling->pi_lock);
+                    raw_spin_lock_irqsave(&src_rq->lock, flags);
+                     
+                    deactivate_task(src_rq, sibling, 0);
+
+                    sibling->on_rq = TASK_ON_RQ_MIGRATING;
+                    set_task_cpu(sibling, cpu);
+                    //target->on_rq = TASK_ON_RQ_QUEUED;
+                    //activate_task(src_rq, sibling, 0);
+
+                    raw_spin_unlock(&src_rq->lock);
+                    raw_spin_unlock(&sibling->pi_lock);
+
+                    raw_spin_lock(&dst_rq->lock);
+                    sibling->on_rq = TASK_ON_RQ_QUEUED;
+                    activate_task(dst_rq, sibling, 0);
+                    //check_preempt_curr(dst_rq, sibling, 0);
+                    raw_spin_unlock(&dst_rq->lock);
+
+                    local_irq_restore(flags);
+
+                    raw_spin_lock(&dst_rq->lock);
+
+                    printk("curr_name: %s, curr_pid: %d, s_name: %s, s_pid: %d cpu: %d throttled: %d\n", 
+                            prev->comm, prev->pid, sibling->comm, sibling->pid, task_cpu(sibling), throttled_lb_pair(task_group(sibling), src_cpu, cpu));
+                    break;
+                }
+            }
+        }
+    }
+
+    /*
+    if (target != NULL) {
+        int src_cpu = task_cpu(target);
+        struct rq* src_rq = task_rq(target);
+        struct rq* dst_rq = task_rq(prev);
+        unsigned long flags;
+
+
+        if(task_running(src_rq, target)) {
+            printk("Task is running NOW! name: %s, pid: %d\n",
+                    target->comm, target->pid);
+        } else {
+
+            raw_spin_unlock(&dst_rq->lock);
+
+            raw_spin_lock_irq(&src_rq->lock);
+             
+            deactivate_task(src_rq, target, 0);
+
+            //target->on_rq = TASK_ON_RQ_QUEUED;
+            //target->on_rq = TASK_ON_RQ_MIGRATING;
+            set_task_cpu(target, task_cpu(target));
+            //target->on_rq = TASK_ON_RQ_QUEUED;
+            activate_task(src_rq, target, 0);
+
+            raw_spin_unlock(&src_rq->lock);
+
+            raw_spin_lock(&dst_rq->lock);
+            target->on_rq = TASK_ON_RQ_QUEUED;
+            activate_task(dst_rq, target, 0);
+            //check_preempt_curr(dst_rq, p, 0);
+            raw_spin_unlock(&dst_rq->lock);
+
+            raw_spin_lock(&dst_rq->lock);
+        }
+
+    }
+    */
+
+    goto again;
+
+    /* End of Mod */
 }
 
 /*
@@ -8486,6 +8776,9 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
      */
     cfs_rq->counter = 0;
     cfs_rq->diff_min_vruntime = 0;
+    cfs_rq->sum_min_vruntime = 0;
+    cfs_rq->start_time = 0;
+    cfs_rq->end_time = 0;
     /**/
 }
 
